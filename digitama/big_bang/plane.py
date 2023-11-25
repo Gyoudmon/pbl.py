@@ -26,10 +26,9 @@ class _GlidingMotion(object):
         self.absolute = absolute
 
 class _MatterInfo(IMatterInfo):
-    def __init__(self, master, mode):
+    def __init__(self, master):
         super(_MatterInfo, self).__init__(master)
         
-        self.mode = mode
         self.x, self.y = 0.0, 0.0
         self.selected = False
 
@@ -52,11 +51,10 @@ class _MatterInfo(IMatterInfo):
 
 ###############################################################################
 class Plane(object):
-    def __init__(self, name, initial_mode = 0):
+    def __init__(self, name):
         super(Plane, self).__init__()
         self.info: typing.Optional(IPlaneInfo) = None
         self.__caption = name
-        self.__mode = initial_mode
         self.__background, self.__bg_alpha = 0, 0.0
         self.__mleft, self.__mtop, self.__mright, self.__mbottom = 0.0, 0.0, 0.0, 0.0
         self.__head_matter: typing.Optional(IMatter) = None
@@ -80,21 +78,6 @@ class Plane(object):
     def name(self):
         return self.__caption
 
-    def change_mode(self, mode):
-        if mode != self.__mode:
-            self.no_selected()
-            self.__mode = mode
-            self.size_cache_invalid()
-            self.notify_updated()
-
-    def current_mode(self):
-        return self.__mode
-
-    def matter_unmasked(self, m):
-        info = _plane_matter_info(self, m)
-
-        return info and _unsafe_matter_unmasked(info, self.__mode)
-
 # public
     def construct(self, Width, Height): pass
     def load(self, Width, Height): pass
@@ -115,7 +98,7 @@ class Plane(object):
             while True:
                 info = child.info
 
-                if _unsafe_matter_unmasked(info, self.__mode) and child.visible():
+                if child.visible():
                     mwidth, mheight = child.get_extent(info.x, info.y)
 
                     mx = (info.x + self.__translate_x) * self.__scale_x + X
@@ -154,17 +137,16 @@ class Plane(object):
             while True:
                 info = child.info
 
-                if _unsafe_matter_unmasked(info, self.__mode):
-                    if not child.concealled():
-                        sx, sy, sw, sh = _unsafe_get_matter_bound(child, info)
+                if not child.concealled():
+                    sx, sy, sw, sh = _unsafe_get_matter_bound(child, info)
 
-                        sx += (self.__translate_x * self.__scale_x)
-                        sy += (self.__translate_y * self.__scale_y)
+                    sx += (self.__translate_x * self.__scale_x)
+                    sy += (self.__translate_y * self.__scale_y)
 
-                        if flin(sx, x, sx + sw) and flin(sy, y, sy + sh):
-                            if child.is_colliding_with_mouse(x - sx, y - sy):
-                                found = child
-                                break
+                    if flin(sx, x, sx + sw) and flin(sy, y, sy + sh):
+                        if child.is_colliding_with_mouse(x - sx, y - sy):
+                            found = child
+                            break
 
                 child = info.prev
 
@@ -177,7 +159,7 @@ class Plane(object):
         info = _plane_matter_info(self, matter)
         x, y = False, 0.0
 
-        if info and _unsafe_matter_unmasked(info, self.__mode):
+        if info:
             sx, sy, sw, sh = _unsafe_get_matter_bound(matter, info)
 
             if isinstance(anchor, MatterAnchor):
@@ -194,7 +176,7 @@ class Plane(object):
         info = _plane_matter_info(self, matter)
         x, y, width, height = False, 0.0, 0.0, 0.0
         
-        if info and _unsafe_matter_unmasked(info, self.__mode):
+        if info:
             x, y, width, height = _unsafe_get_matter_bound(matter, info)
 
         return x, y, width, height
@@ -206,12 +188,83 @@ class Plane(object):
         h = self.__mbottom - self.__mtop
 
         return self.__mleft, self.__mtop, w, h
+    
+    def bring_to_front(self, m, target = None):
+        tinfo = _plane_matter_info(self, target)
+
+        if not tinfo:
+            if not self.__head_matter:
+                self.bring_to_front(m, self.__head_matter.info.prev)
+        else:
+            sinfo = _plane_matter_info(self, m)
+        
+            if sinfo and (m != target):
+                if tinfo.next != m:
+                    sinfo.prev.info.next = sinfo.next
+                    sinfo.next.info.prev = sinfo.prev
+                    tinfo.next.info.prev = m
+                    sinfo.prev = target
+                    sinfo.next = tinfo.next
+                    tinfo.next = m
+
+                if self.head_matter == m:
+                    self.head_matter = sinfo.next
+            
+                self.notify_updated()
+
+    def bring_forward(self, m, n = 1):
+        sinfo = _plane_matter_info(self, m)
+    
+        if sinfo:
+            sentry = self.__head_matter.info.prev
+            target = m
+
+            while (target != sentry) and (n > 0):
+                n = n - 1
+                target = target.info.next
+
+            self.bring_to_front(m, target)
+
+    def send_to_back(self, m, target = None):
+        tinfo = _plane_matter_info(self, target)
+
+        if not tinfo:
+            if not self.__head_matter:
+                self.send_to_back(m, self.__head_matter)
+        else:
+            sinfo = _plane_matter_info(self, m)
+        
+            if sinfo and (m != target):
+                if tinfo.prev != m:
+                    sinfo.prev.info.next = sinfo.next
+                    sinfo.next.info.prev = sinfo.prev
+                    tinfo.prev.info.next = m
+                    sinfo.next = target
+                    sinfo.prev = tinfo.prev
+                    tinfo.prev = m
+
+                if self.__head_matter == target:
+                    self.__head_matter = m
+
+                self.notify_updated()
+
+    def send_backward(self, m, n = 1):
+        sinfo = _plane_matter_info(self, m)
+    
+        if sinfo:
+            target = m
+
+            while (target != self.__head_matter) and (n > 0):
+                n = n - 1
+                target = target.info.prev
+
+            self.send_to_back(m, target)
 
     def insert(self, matter: IMatter, x = 0.0, y = 0.0, anchor: MatterAnchor = MatterAnchor.LT, dx = 0.0, dy = 0.0):
         if matter.info is None:
             fx, fy = matter_anchor_fraction(anchor)
             
-            info = _bind_matter_owership(self, self.__mode, matter)
+            info = _bind_matter_owership(self, matter)
             if not self.__head_matter:
                 self.__head_matter = matter
                 info.prev = self.__head_matter
@@ -245,7 +298,7 @@ class Plane(object):
         if matter:
             info = _plane_matter_info(self, matter)
 
-            if info and _unsafe_matter_unmasked(info, self.__mode):
+            if info:
                 if self.__move_matter_via_info(matter, info, x, y, False, ignore_gliding):
                     self.notify_updated()
         elif self.__head_matter:
@@ -254,8 +307,8 @@ class Plane(object):
             while True:
                 info = child.info
 
-                if info.selected and _unsafe_matter_unmasked(info, self.__mode):
-                    self.__move_matter_via_info(matter, info, x, y, False, ignore_gliding)
+                if info.selected:
+                    self.__move_matter_via_info(child, info, x, y, False, ignore_gliding)
 
                 child = info.next
                 if child == self.__head_matter:
@@ -267,17 +320,16 @@ class Plane(object):
         info = _plane_matter_info(self, matter)
 
         if info:
-            if _unsafe_matter_unmasked(info, self.__mode):
-                if self.__glide_matter_via_info(matter, info, sec, x, y, False):
-                    self.notify_updated()
+            if self.__glide_matter_via_info(matter, info, sec, x, y, False):
+                self.notify_updated()
         elif self.__head_matter:
             child = self.__head_matter
 
             while True:
                 info = child.info
 
-                if info.selected and _unsafe_matter_unmasked(info, self.__mode):
-                    self.__glide_matter_via_info(matter, info, sec, x, y, False)
+                if info.selected:
+                    self.__glide_matter_via_info(child, info, sec, x, y, False)
 
                 child = info.next
                 if child == self.__head_matter:
@@ -288,7 +340,7 @@ class Plane(object):
     def move_to(self, matter: IMatter, target, anchor: MatterAnchor = MatterAnchor.LT, dx = 0.0, dy = 0.0):
         info = _plane_matter_info(self, matter)
         
-        if info and _unsafe_matter_unmasked(info, self.__mode):
+        if info:
             pos = self.__extract_moving_target_info(target)
             
             if isinstance(pos, tuple):
@@ -300,7 +352,7 @@ class Plane(object):
     def glide_to(self, sec, matter: IMatter, target, anchor: MatterAnchor = MatterAnchor.LT, dx = 0.0, dy = 0.0):
         info = _plane_matter_info(self, matter)
         
-        if info and _unsafe_matter_unmasked(info, self.__mode):
+        if info:
             pos = self.__extract_moving_target_info(target)
             
             if isinstance(pos, tuple):
@@ -316,7 +368,7 @@ class Plane(object):
     def remove(self, matter: IMatter):
         info = _plane_matter_info(self, matter)
 
-        if info and _unsafe_matter_unmasked(info, self.__mode):
+        if info:
             prev_info = info.prev
             next_info = info.next
 
@@ -384,7 +436,7 @@ class Plane(object):
         else:
             info = _plane_matter_info(self, start)
 
-            if info and _unsafe_matter_unmasked(info, self.__mode):
+            if info:
                 found = _do_search_selected_matter(info.next, self.__mode, self.__head_matter)
 
         return found
@@ -394,14 +446,14 @@ class Plane(object):
             info = _plane_matter_info(self, m)
 
             if info and not info.selected:
-                if _unsafe_matter_unmasked(info, self.__mode) and self.can_select(m):
+                if self.can_select(m):
                     _unsafe_add_selected(self, m, info)
     
     def set_selected(self, m):
         info = _plane_matter_info(self, m)
 
         if info and not info.selected:
-            if _unsafe_matter_unmasked(info, self.__mode) and self.can_select(m):
+            if self.can_select(m):
                 _unsafe_set_selected(self, m, info)
     
     def no_selected(self):
@@ -413,7 +465,7 @@ class Plane(object):
             while True:
                 info = child.info
 
-                if info.selected and _unsafe_matter_unmasked(info, self.__mode):
+                if info.selected:
                     self.before_select(child, False)
                     info.selected = False
                     self.after_select(child, False)
@@ -434,7 +486,7 @@ class Plane(object):
             while True:
                 info = child.info
 
-                if info.selected and _unsafe_matter_unmasked(info, self.__mode):
+                if info.selected:
                     n += 1
 
                 child = info.next
@@ -447,7 +499,7 @@ class Plane(object):
         info = _plane_matter_info(self, m)
         selected = False
 
-        if info and _unsafe_matter_unmasked(self, self.__mode):
+        if info:
             selected = info.selected
 
         return selected
@@ -595,16 +647,15 @@ class Plane(object):
                 dwidth, dheight = self.info.master.get_extent()
                 info: _MatterInfo = child.info
                 
-                if _unsafe_matter_unmasked(info, self.__mode):
-                    local_interval, local_elapse = _local_timeline_elapse(interval, info.local_frame_delta, info.local_elapse, info.duration)
-                    info.local_elapse = local_elapse
+                local_interval, local_elapse = _local_timeline_elapse(interval, info.local_frame_delta, info.local_elapse, info.duration)
+                info.local_elapse = local_elapse
 
-                    if local_interval > 0:
-                        info.duration = child.update(info.local_frame_count, local_interval, uptime)
-                        info.local_frame_count += 1
+                if local_interval > 0:
+                    info.duration = child.update(info.local_frame_count, local_interval, uptime)
+                    info.local_frame_count += 1
 
-                    # Yes, do moving separately to make it more smooth
-                    self.__do_motion_moving(child, info, dwidth, dheight)
+                # Yes, do moving separately to make it more smooth
+                self.__do_motion_moving(child, info, dwidth, dheight)
                     
                 child = info.next
 
@@ -681,7 +732,7 @@ class Plane(object):
             if m and m.events_allowed():
                 info = _plane_matter_info(self, m)
 
-                if info and _unsafe_matter_unmasked(info, self.__mode):
+                if info:
                     if self.__focused_matter:
                         self.__focused_matter.own_caret(False)
                         self.on_focus(self.__focused_matter, False)
@@ -787,12 +838,11 @@ class Plane(object):
                 while True:
                     info = child.info
 
-                    if _unsafe_matter_unmasked(info, self.__mode):
-                        x, y, w, h = _unsafe_get_matter_bound(child, info)
-                        self.__mleft = min(self.__mleft, x)
-                        self.__mright = max(self.__mright, x + w)
-                        self.__mtop = min(self.__mtop, y)
-                        self.__mbottom = max(self.__mbottom, y + h)
+                    x, y, w, h = _unsafe_get_matter_bound(child, info)
+                    self.__mleft = min(self.__mleft, x)
+                    self.__mright = max(self.__mright, x + w)
+                    self.__mtop = min(self.__mtop, y)
+                    self.__mbottom = max(self.__mbottom, y + h)
 
                     child = info.next
                     if child == self.__head_matter:
@@ -836,7 +886,7 @@ class Plane(object):
             if isinstance(target[0], IMatter):
                 tinfo = _plane_matter_info(self, target[0])
 
-                if tinfo and _unsafe_matter_unmasked(tinfo, self.__mode):
+                if tinfo:
                     tx, ty, tw, th = _unsafe_get_matter_bound(target[0], tinfo)
                     tfx, tfy = matter_anchor_fraction(target[1])
                     pos = (tx + tw * tfx, ty + th * tfy)
@@ -845,18 +895,17 @@ class Plane(object):
         elif target_shape == 3:
             tinfo = _plane_matter_info(self, target[0])
 
-            if tinfo and _unsafe_matter_unmasked(tinfo, self.__mode):
+            if tinfo:
                 tx, ty, tw, th = _unsafe_get_matter_bound(target[0], tinfo)
                 pos = (tx + tw * target[1], ty + th * target[2])
         else:
             xinfo = _plane_matter_info(self, target[0])
             yinfo = _plane_matter_info(self, target[2])
 
-            if xinfo and _unsafe_matter_unmasked(xinfo, self.__mode):
-                if yinfo and _unsafe_matter_unmasked(yinfo, self.__mode):
-                    xtx, _, xtw, _ = _unsafe_get_matter_bound(target[0], xinfo)
-                    _, yty, _, yth = _unsafe_get_matter_bound(target[2], yinfo)
-                    pos = (xtx + xtw * target[1], yty + yth * target[2])
+            if xinfo and yinfo:
+                xtx, _, xtw, _ = _unsafe_get_matter_bound(target[0], xinfo)
+                _, yty, _, yth = _unsafe_get_matter_bound(target[2], yinfo)
+                pos = (xtx + xtw * target[1], yty + yth * target[2])
 
         return pos
     
@@ -1058,8 +1107,8 @@ class Plane(object):
                     self.notify_updated()
 
 ###################################################################################################
-def _bind_matter_owership(master, mode, m: IMatter):
-    m.info = _MatterInfo(master, mode)
+def _bind_matter_owership(master, m: IMatter):
+    m.info = _MatterInfo(master)
     _unsafe_set_matter_fps(m.info, m.preferred_loacal_fps(), True)
     
     return m.info
@@ -1071,9 +1120,6 @@ def _plane_matter_info(master, m):
         info = m.info
     
     return info
-
-def _unsafe_matter_unmasked(info, mode):
-    return (info.mode & mode) == info.mode
 
 def _unsafe_get_matter_bound(m: IMatter, info):
     width, height = m.get_extent(info.x, info.y)
@@ -1092,14 +1138,14 @@ def _unsafe_set_selected(master, m, info):
     _unsafe_add_selected(master, m, info)
     master.end_update_sequence()
 
-def _do_search_selected_matter(start: IMatter, mode, terminator):
+def _do_search_selected_matter(start: IMatter, terminator):
     found = None
     child = start
 
     while child != terminator:
         info = child.info
 
-        if info.selected and _unsafe_matter_unmasked(info, mode):
+        if info.selected:
             found = child
             break
 

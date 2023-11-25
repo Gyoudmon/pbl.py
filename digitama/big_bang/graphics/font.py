@@ -142,10 +142,13 @@ def generic_font_family_name_for_chinese(family: FontFamily):
 def game_create_font(face, fontsize = _default_fontsize):
     font = None
 
-    if face in _system_fonts:
-        font = pygame.font.FontType(_system_fonts[face], fontsize)
-    else:
-        font = pygame.font.FontType(face, fontsize)
+    try:
+        if face in _system_fonts:
+            font = pygame.font.Font(_system_fonts[face], fontsize)
+        else:
+            font = pygame.font.Font(face, fontsize)
+    except FileNotFoundError:
+        font = pygame.font.Font(_system_fonts[generic_font_family_name_for_chinese(FontFamily.sans_serif)], fontsize)
 
     return font
 
