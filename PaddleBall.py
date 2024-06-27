@@ -31,7 +31,7 @@ class PaddleBallWorld(Plane):
         self.set_background(BLACK)
 
     # 实现 PaddleBallWorld::on_mission_start 方法，调整球和桨的初始位置
-    def on_mission_start(self, width, height):
+    def reflow(self, width, height):
         # 确保球产生与屏幕上方的中间
         self.move_to(self.ball, (width * 0.5, ball_radius), MatterAnchor.CT)
         # 确保桨产生在靠近屏幕下方的中间
